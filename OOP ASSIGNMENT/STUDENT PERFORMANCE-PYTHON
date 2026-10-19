@@ -1,0 +1,302 @@
+"""
+Student Performance Analysis System
+-----------------------------------
+Loads student records from a CSV file, calculates performance metrics,
+identifies scholarship-eligible students and generates performance reports.
+
+OOP concepts demonstrated:
+  - Classes and objects      : Student, AIUStudent, ScholarshipStudent, PerformanceAnalyzer
+  - Encapsulation            : protected (_) and private (__) attributes + properties
+  - Abstraction              : Student is an ABC with abstract method student_type()
+  - Inheritance              : AIUStudent(Student), ScholarshipStudent(AIUStudent)
+  - Polymorphism / overriding: describe() behaves differently per student type
+  - Flexible interfaces      : calculate_average(*marks) (variable-length arguments)
+  - Composition              : PerformanceAnalyzer HAS-A collection of Student objects
+"""
+
+import csv
+from abc import ABC, abstractmethod
+
+SUBJECTS = ("Math", "English", "Science")
+SCHOLARSHIP_CUTOFF = 85          # minimum average for scholarship eligibility
+DEFAULT_SCHOLARSHIP = 50000      # default scholarship amount awarded
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Base class (abstraction + encapsulation)
+# ---------------------------------------------------------------------------
+class Student(ABC):
+    """Abstract base class representing a student."""
+
+    def __init__(self, student_id, first_name, last_name, programme, marks):
+        self._student_id = student_id          # protected: internal use / subclasses
+        self._first_name = first_name
+        self._last_name = last_name
+        self._programme = programme
+        self.__marks = {}                      # private: only changed via set_mark()
+        for subject, mark in marks.items():
+            self.set_mark(subject, mark)       # reuse validation
+
+    # ----- accessors (getters) -----
+    @property
+    def student_id(self):
+        return self._student_id
+
+    @property
+    def first_name(self):
+        return self._first_name
+
+    @property
+    def last_name(self):
+        return self._last_name
+
+    @property
+    def full_name(self):
+        return f"{self._first_name} {self._last_name}"
+
+    @property
+    def programme(self):
+        return self._programme
+
+    @property
+    def marks(self):
+        """Return a COPY so outside code cannot modify the private marks."""
+        return dict(self.__marks)
+
+    # ----- mutator with validation -----
+    def set_mark(self, subject, mark):
+        """Add or update a subject mark (must be a number between 0 and 100)."""
+        if not isinstance(mark, (int, float)) or isinstance(mark, bool):
+            raise TypeError(f"Mark for {subject} must be a number, got {mark!r}")
+        if not 0 <= mark <= 100:
+            raise ValueError(f"Mark for {subject} must be between 0 and 100, got {mark}")
+        self.__marks[subject] = mark
+
+    # ----- Task 6: flexible interface (method "overloading" equivalent) -----
+    @staticmethod
+    def calculate_average(*marks):
+        """
+        Average of any number of marks.
+          calculate_average(75, 80, 70)        -> three marks supplied separately
+          calculate_average(75, 80, 70, 65)    -> variable number of marks
+          calculate_average(*[75, 80, 70])     -> unpack a list
+          calculate_average()                  -> uses no marks: raises ValueError
+        """
+        if len(marks) == 0:
+            raise ValueError("At least one mark is required")
+        for mark in marks:
+            if not isinstance(mark, (int, float)) or isinstance(mark, bool):
+                raise TypeError(f"Marks must be numbers, got {mark!r}")
+            if not 0 <= mark <= 100:
+                raise ValueError(f"Marks must be between 0 and 100, got {mark}")
+        return sum(marks) / len(marks)
+
+    # ----- performance metrics -----
+    @property
+    def average(self):
+        """Average of this student's own marks."""
+        return self.calculate_average(*self.__marks.values())
+
+    def get_grade(self):
+        """Convert the average into a letter grade."""
+        avg = self.average
+        if avg >= 80:
+            return "A"
+        if avg >= 70:
+            return "B"
+        if avg >= 60:
+            return "C"
+        if avg >= 50:
+            return "D"
+        return "F"
+
+    # ----- abstract method every subclass MUST implement -----
+    @abstractmethod
+    def student_type(self):
+        """Return a label describing the kind of student."""
+
+    # ----- shared method that subclasses may override (polymorphism) -----
+    def describe(self):
+        return f"{self.full_name} [{self.student_type()}] - average {self.average:.2f}, grade {self.get_grade()}"
+
+    def generate_report(self):
+        """Readable performance report for one student (Task 7)."""
+        lines = [
+            "-" * 50,
+            f"Student ID : {self.student_id}",
+            f"Name       : {self.full_name}",
+            f"Programme  : {self.programme}",
+            f"Type       : {self.student_type()}",
+            "Marks      : " + ", ".join(f"{s}: {m}" for s, m in self.marks.items()),
+            f"Average    : {self.average:.2f}",
+            f"Grade      : {self.get_grade()}",
+        ]
+        lines.extend(self._extra_report_lines())
+        return "\n".join(lines)
+
+    def _extra_report_lines(self):
+        """Hook for subclasses to add lines to the report."""
+        return []
+
+    def __str__(self):
+        return self.describe()
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Concrete subclass implementing the abstract method
+# ---------------------------------------------------------------------------
+class AIUStudent(Student):
+    """A regular (non-scholarship) student."""
+
+    def student_type(self):
+        return "Regular AIU Student"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Inheritance, super(), method overriding
+# ---------------------------------------------------------------------------
+class ScholarshipStudent(AIUStudent):
+    """A student who may qualify for a scholarship."""
+
+    def __init__(self, student_id, first_name, last_name, programme, marks,
+                 scholarship_amount=DEFAULT_SCHOLARSHIP):
+        super().__init__(student_id, first_name, last_name, programme, marks)  # parent constructor
+        self.scholarship_amount = scholarship_amount
+
+    def is_eligible(self):
+        """Eligible when the average is at least 85."""
+        return self.average >= SCHOLARSHIP_CUTOFF
+
+    def awarded_amount(self):
+        """Amount actually awarded (0 if not eligible)."""
+        return self.scholarship_amount if self.is_eligible() else 0
+
+    # overridden methods
+    def student_type(self):
+        return "Scholarship Student"
+
+    def describe(self):
+        base = super().describe()          # reuse parent behaviour, then extend it
+        status = "ELIGIBLE" if self.is_eligible() else "NOT eligible"
+        return f"{base} | Scholarship: {status} (KES {self.awarded_amount():,})"
+
+    def _extra_report_lines(self):
+        status = "Eligible" if self.is_eligible() else "Not eligible"
+        return [
+            f"Scholarship: {status}",
+            f"Amount     : KES {self.awarded_amount():,}",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Composition - analyzer works on Student objects, not copies of data
+# ---------------------------------------------------------------------------
+class PerformanceAnalyzer:
+    def __init__(self, students):
+        self._students = list(students)    # list of references to Student objects
+        if not self._students:
+            raise ValueError("PerformanceAnalyzer needs at least one student")
+
+    def highest_average(self):
+        return max(self._students, key=lambda s: s.average)
+
+    def lowest_average(self):
+        return min(self._students, key=lambda s: s.average)
+
+    def class_average(self):
+        return sum(s.average for s in self._students) / len(self._students)
+
+    def eligible_students(self):
+        return [s for s in self._students
+                if isinstance(s, ScholarshipStudent) and s.is_eligible()]
+
+    def generate_report(self):
+        """Full report: every student plus the class summary (Task 7)."""
+        parts = ["=" * 50, "STUDENT PERFORMANCE REPORT", "=" * 50]
+        parts.extend(s.generate_report() for s in self._students)
+        high, low = self.highest_average(), self.lowest_average()
+        parts += [
+            "=" * 50,
+            "CLASS PERFORMANCE SUMMARY",
+            "=" * 50,
+            f"Number of students : {len(self._students)}",
+            f"Highest average    : {high.average:.2f} ({high.full_name})",
+            f"Lowest average     : {low.average:.2f} ({low.full_name})",
+            f"Class average      : {self.class_average():.2f}",
+            f"Scholarship-eligible: {', '.join(s.full_name for s in self.eligible_students()) or 'None'}",
+            "=" * 50,
+        ]
+        return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# CSV loading (Task 1 dataset)
+# ---------------------------------------------------------------------------
+def load_students(filename):
+    """
+    Read students from a CSV file.
+    Students whose average is >= 85 become ScholarshipStudent objects;
+    everyone else becomes an AIUStudent.
+    """
+    students = []
+    with open(filename, newline="", encoding="utf-8") as file:
+        for row_number, row in enumerate(csv.DictReader(file), start=2):
+            try:
+                marks = {subject: float(row[subject]) for subject in SUBJECTS}
+                args = (row["StudentID"], row["FName"], row["LName"], row["Programme"], marks)
+                if Student.calculate_average(*marks.values()) >= SCHOLARSHIP_CUTOFF:
+                    students.append(ScholarshipStudent(*args))
+                else:
+                    students.append(AIUStudent(*args))
+            except (KeyError, ValueError, TypeError) as error:
+                print(f"Skipping row {row_number}: {error}")
+    return students
+
+
+# ---------------------------------------------------------------------------
+# Demonstration
+# ---------------------------------------------------------------------------
+def main():
+    students = load_students("students.csv")
+
+    # Task 5: polymorphism - one list, mixed types, same method call
+    print("POLYMORPHISM DEMO: calling describe() on mixed student types")
+    for student in students:
+        print(" ", student.describe())   # correct version runs for each object's class
+
+    # Task 4: inheritance - ScholarshipStudent still has parent features
+    top = next(s for s in students if isinstance(s, ScholarshipStudent))
+    print("\nINHERITANCE DEMO (ScholarshipStudent):")
+    print("  Inherited full_name :", top.full_name)
+    print("  Inherited get_grade :", top.get_grade())
+    print("  Own is_eligible()   :", top.is_eligible())
+    print("  isinstance AIUStudent/Student:", isinstance(top, AIUStudent), isinstance(top, Student))
+
+    # Task 6: flexible interface
+    print("\nFLEXIBLE INTERFACE DEMO: calculate_average()")
+    print("  3 separate marks (75, 80, 70)      :", Student.calculate_average(75, 80, 70))
+    print("  5 marks (75, 80, 70, 65, 90)       :", Student.calculate_average(75, 80, 70, 65, 90))
+    print("  1 mark (88)                        :", Student.calculate_average(88))
+    for bad in [(), (75, 120), (75, "A")]:
+        try:
+            Student.calculate_average(*bad)
+        except (ValueError, TypeError) as error:
+            print(f"  Invalid input {bad!r} -> {type(error).__name__}: {error}")
+
+    # Encapsulation demo
+    print("\nENCAPSULATION DEMO:")
+    marks_copy = students[0].marks
+    marks_copy["Math"] = 0                       # changes the copy only
+    print("  Original Math mark still:", students[0].marks["Math"])
+    try:
+        students[0].set_mark("Math", 150)
+    except ValueError as error:
+        print("  Validation works ->", error)
+
+    # Task 7: reports (also uses Task 3 analyzer)
+    print()
+    print(PerformanceAnalyzer(students).generate_report())
+
+
+if __name__ == "__main__":
+    main()
